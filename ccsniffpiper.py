@@ -54,6 +54,7 @@ import threading
 import binascii
 import usb.core
 import usb.util
+import crc16
 from locale import str
 
 __version__ = '0.0.1'
@@ -65,7 +66,7 @@ defaults = {
     'debug_level': 'WARN',
     'log_level': 'INFO',
     'log_file': 'ccsniffpiper.log',
-    'channel': 11,
+    'channel': 17,
 }
 
 logger = logging.getLogger(__name__)
@@ -335,8 +336,12 @@ class CC2531:
 
         while self.running:
             bytesteam = self.dev.read(CC2531.DATA_EP, 4096, timeout=CC2531.DATA_TIMEOUT)
-#             print "RECV>> %s" % binascii.hexlify(bytesteam)
-
+            #print "RECV>> %s" % binascii.hexlify(bytesteam)
+            print "FCS>> %s" % binascii.hexlify(bytesteam[-2:])
+            crc_ok = bytesteam[-1] & 0x80
+            print "CRC_OK: %s" % bool(crc_ok)
+            #print type(bytesteam)
+            #print bytesteam.typecode
             if len(bytesteam) >= 3:
                 (cmd, cmdLen) = struct.unpack_from("<BH", bytesteam)
                 bytesteam = bytesteam[3:]
@@ -347,8 +352,19 @@ class CC2531:
                         stats['Captured'] += 1
                         (timestamp, pktLen) = struct.unpack_from("<IB", bytesteam)
                         frame = bytesteam[5:]
-
+                        #print "FCS>> %s" % binascii.hexlify(bytesteam[-2:])
+                        #crc_ok = bytesteam[-1] & 0x80
+                        #print "CRC_OK: %s" % bool(crc_ok)
                         if len(frame) == pktLen:
+                            if crc_ok:
+                                crc16.crc.update(frame[:-2].tostring())
+                                print "checksum: 0x%s" %binascii.hexlify(crc16.crc.checksum())
+                                #print crc16.crc.checksum()[0]
+                                #print type(crc16.crc.checksum()[0])
+                                #frame[-2] = int(crc16.crc.checksum()[0])
+                                #frame[-1] = crc16.crc.checksum()[1]
+                                frame[-1] = crc16.crc.intchecksum() >> 8
+                                frame[-2] = crc16.crc.intchecksum() & 0xff
                             self.callback(timestamp, frame.tostring())
                         else:
                             logger.warn("Received a frame with incorrect length, pkgLen:%d, len(frame):%d" %(pktLen, len(frame)))
@@ -585,4 +601,3 @@ if __name__ == '__main__':
             snifferDev.stop()
         dump_stats()
         sys.exit(0)
-
